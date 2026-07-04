@@ -1,6 +1,11 @@
 async function sendViaRelay(nomor) {
     const accounts = await accCol.find({}).toArray();
     
+    if (accounts.length === 0) {
+        sysLog("GAGAL", "Tidak ada akun email di database!", cRed);
+        return false;
+    }
+
     for (let i = 0; i < accounts.length; i++) {
         let acc = accounts[i];
         
@@ -15,7 +20,8 @@ async function sendViaRelay(nomor) {
                     apiKey: acc.apiKey, 
                     from: acc.senderEmail
                 },
-                validateStatus: (status) => status < 500 
+                timeout: 60000, // FIX: Memberikan waktu 60 detik agar tidak "Timeout 10000ms"
+                validateStatus: () => true // FIX: Mencegah axios panik jika Vercel mengembalikan error 500
             });
 
             // Logika baru untuk mendeteksi kesuksesan
@@ -26,13 +32,13 @@ async function sendViaRelay(nomor) {
                 return true; 
             } else {
                 // Mengambil pesan error dari respons Vercel/Resend
-                const errorData = response.data && response.data.error ? response.data.error.message : (response.data.message || "Unknown error");
+                const errorData = response.data && response.data.error ? response.data.error.message : (response.data ? response.data.message : `HTTP Status ${response.status}`);
                 sysLog("ROLLING", `Email ${acc.senderEmail} ditolak: ${errorData}`, cYellow);
             }
             
         } catch (err) {
-            // Menangkap error jika Vercel sendiri yang down (500) atau timeout
-            sysLog("ROLLING", `Email ${acc.senderEmail} error koneksi ke Vercel: ${err.message}`, cRed);
+            // Menangkap error jika benar-benar putus koneksi / timeout lebih dari 60 detik
+            sysLog("ROLLING", `Email ${acc.senderEmail} error koneksi/timeout: ${err.message}`, cRed);
         }
     }
     
