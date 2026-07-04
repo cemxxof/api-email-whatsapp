@@ -1,47 +1,73 @@
-async function sendViaRelay(nomor) {
-    const accounts = await accCol.find({}).toArray();
-    
-    if (accounts.length === 0) {
-        sysLog("GAGAL", "Tidak ada akun email di database!", cRed);
-        return false;
+const https = require('https');
+
+module.exports = function(req, res) {
+    // 1. Pastikan hanya menerima request POST
+    if (req.method !== 'POST') {
+        return res.status(405).json({ success: false, message: 'Method not allowed' });
     }
 
-    for (let i = 0; i < accounts.length; i++) {
-        let acc = accounts[i];
-        
-        try {
-            const response = await axios({
-                method: 'post',
-                url: VERCEL_API_URL,
-                data: {
-                    to: "android@support.whatsapp.com", 
-                    subject: `Pregunta sobre WhatsApp 'Login not available' : ${nomor}`,
-                    text: `Hola Soporte de WhatsApp, me gustaría apelar sobre el problema de registro de mi cuenta. Mi número (${nomor}) actualmente muestra 'Login not available'. ¿Podrían revisar y ajudar a resolver esto? Gracias.`,
-                    apiKey: acc.apiKey, 
-                    from: acc.senderEmail
-                },
-                timeout: 60000, // FIX: Memberikan waktu 60 detik agar tidak "Timeout 10000ms"
-                validateStatus: () => true // FIX: Mencegah axios panik jika Vercel mengembalikan error 500
-            });
+    try {
+        // 2. Ambil data dengan aman
+        const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+        const { to, subject, text, apiKey, from } = body || {};
 
-            // Logika baru untuk mendeteksi kesuksesan
-            const isSuccess = response.status === 200 && response.data && response.data.success === true;
-            
-            if (isSuccess) {
-                sysLog("SUKSES", `Pesan berhasil terkirim via ${acc.senderEmail}`, cGreen);
-                return true; 
-            } else {
-                // Mengambil pesan error dari respons Vercel/Resend
-                const errorData = response.data && response.data.error ? response.data.error.message : (response.data ? response.data.message : `HTTP Status ${response.status}`);
-                sysLog("ROLLING", `Email ${acc.senderEmail} ditolak: ${errorData}`, cYellow);
-            }
-            
-        } catch (err) {
-            // Menangkap error jika benar-benar putus koneksi / timeout lebih dari 60 detik
-            sysLog("ROLLING", `Email ${acc.senderEmail} error koneksi/timeout: ${err.message}`, cRed);
+        if (!to || !apiKey || !from) {
+            return res.status(400).json({ success: false, message: 'Data API tidak lengkap' });
         }
+
+        // 3. Susun data untuk Resend
+        const payload = JSON.stringify({
+            from: from,
+            to: to,
+            subject: subject,
+            text: text
+        });
+
+        const options = {
+            hostname: 'api.resend.com',
+            path: '/emails',
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + apiKey,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        };
+
+        // 4. Kirim ke Resend menggunakan HTTP bawaan sistem
+        const request = https.request(options, (response) => {
+            let data = '';
+            
+            response.on('data', (chunk) => { data += chunk; });
+            
+            response.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    // Jika sukses (Status 200)
+                    if (response.statusCode === 200) {
+                        res.status(200).json({ success: true, data: parsed });
+                    } else {
+                        // Jika Resend menolak (Limit/Salah API Key)
+                        res.status(response.statusCode).json({ success: false, message: parsed.message || 'Ditolak Resend', error: parsed });
+                    }
+                } catch (e) {
+                    res.status(500).json({ success: false, message: 'Gagal membaca respon Resend' });
+                }
+            });
+        });
+
+        // 5. Tangkap jika Vercel gagal nyambung ke Resend
+        request.on('error', (error) => {
+            res.status(500).json({ success: false, message: 'Koneksi ke Resend putus: ' + error.message });
+        });
+
+        // Eksekusi
+        request.write(payload);
+        request.end();
+
+    } catch (error) {
+        // Tangkap error sistem Vercel agar tidak muncul error 500 misterius
+        return res.status(500).json({ success: false, message: 'System Error', detail: error.message });
     }
-    
-    sysLog("GAGAL", `Semua akun email telah dicoba dan tidak ada yang berhasil untuk nomor ${nomor}.`, cRed);
-    return false;
-}
+};
+        
