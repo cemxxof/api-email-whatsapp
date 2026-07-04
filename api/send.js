@@ -12,21 +12,23 @@ async function sendViaRelay(nomor) {
                 from: acc.senderEmail
             });
             
-            // PERBAIKAN: Paksa bot membaca data Vercel. Jika gagal, lempar error agar pindah akun.
-            if (response.data && response.data.success === false) {
-                throw new Error("API Limit atau Ditolak");
+            // LOG RESPONS MENTAH: Ini akan membantu kita melihat apa yang sebenarnya terjadi
+            sysLog("DEBUG", `Respons Vercel [${acc.senderEmail}]: ${JSON.stringify(response.data)}`, cGray);
+            
+            // Cek sukses di level API (termasuk jika Resend menolak dengan success: false)
+            if (response.data && response.data.success === true) {
+                sysLog("SUKSES", `Pesan berhasil terkirim via ${acc.senderEmail}`, cGreen);
+                return true; 
+            } else {
+                throw new Error(response.data.message || "Gagal di sisi API");
             }
-
-            sysLog("SUKSES", `Pesan berhasil terkirim via ${acc.senderEmail}`, cGreen);
-            return true; // Jika sukses, hentikan perulangan
             
         } catch (err) {
-            let nextAcc = accounts[i + 1] ? accounts[i + 1].senderEmail : "HABIS";
-            sysLog("ROLLING", `Email ${acc.senderEmail} gagal/limit, lempar ke ${nextAcc}`, cYellow);
-            // Kode akan otomatis lanjut ke putaran loop berikutnya (akun selanjutnya)
+            sysLog("ROLLING", `Email ${acc.senderEmail} gagal: ${err.message}`, cRed);
+            // Kode akan lanjut ke akun berikutnya karena error tertangkap di catch
         }
     }
     
-    sysLog("GAGAL", `Semua akun email telah limit! Nomor ${nomor} gagal diproses.`, cRed);
+    sysLog("GAGAL", `Semua akun email telah dicoba dan gagal. Nomor ${nomor} tidak terkirim.`, cRed);
     return false;
 }
