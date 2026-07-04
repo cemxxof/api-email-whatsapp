@@ -4,7 +4,6 @@ async function sendViaRelay(nomor) {
     for (let i = 0; i < accounts.length; i++) {
         let acc = accounts[i];
         
-        // Gunakan try-catch agar jika satu akun error/limit, ia tidak menghentikan bot
         try {
             const response = await axios({
                 method: 'post',
@@ -16,26 +15,24 @@ async function sendViaRelay(nomor) {
                     apiKey: acc.apiKey, 
                     from: acc.senderEmail
                 },
-                validateStatus: function (status) {
-                    return status < 500; // Hanya melempar error jika status >= 500 (Server Error)
-                }
+                validateStatus: (status) => status < 500 
             });
 
-            // Cek jika API Vercel mengembalikan success: true
-            if (response.status === 200 && response.data && response.data.success === true) {
+            // Logika baru untuk mendeteksi kesuksesan
+            const isSuccess = response.status === 200 && response.data && response.data.success === true;
+            
+            if (isSuccess) {
                 sysLog("SUKSES", `Pesan berhasil terkirim via ${acc.senderEmail}`, cGreen);
                 return true; 
             } else {
-                // Jika status 200 tapi success false, anggap gagal (mungkin limit)
-                const msg = response.data ? response.data.message : "No response data";
-                sysLog("ROLLING", `Email ${acc.senderEmail} menolak (Limit/Error): ${msg}`, cYellow);
-                // Lanjut ke akun berikutnya
+                // Mengambil pesan error dari respons Vercel/Resend
+                const errorData = response.data && response.data.error ? response.data.error.message : (response.data.message || "Unknown error");
+                sysLog("ROLLING", `Email ${acc.senderEmail} ditolak: ${errorData}`, cYellow);
             }
             
         } catch (err) {
-            // Menangkap error koneksi (jika server down atau timeout)
-            sysLog("ROLLING", `Email ${acc.senderEmail} error koneksi: ${err.message}`, cRed);
-            // Lanjut ke akun berikutnya
+            // Menangkap error jika Vercel sendiri yang down (500) atau timeout
+            sysLog("ROLLING", `Email ${acc.senderEmail} error koneksi ke Vercel: ${err.message}`, cRed);
         }
     }
     
